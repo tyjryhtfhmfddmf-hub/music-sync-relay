@@ -26,5 +26,13 @@ def receive_command(room_code):
     rooms[room_code]["commands"] = []  # clear after sending
     return jsonify({"commands": cmds})
 
+
+@app.route("/join/<room_code>", methods=["POST"])
+def join_room(room_code):
+    if room_code not in rooms:
+        return jsonify({"error": "Room not found"}), 404
+    return jsonify({"status": "joined", "room_code": room_code})
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)

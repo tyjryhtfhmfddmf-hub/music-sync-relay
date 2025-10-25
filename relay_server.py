@@ -27,15 +27,19 @@ def send_command(room_code):
     data = request.json
     command = data.get("command")
     index = data.get("index")
-    extra_data = data.get("data")  # Get the data field
+    extra_data = data.get("data")
     
-    # Store command with optional index and data
     cmd_data = {"command": command}
     if index is not None:
         cmd_data["index"] = index
     if extra_data is not None:
-        cmd_data["data"] = extra_data  # Include the data field
+        cmd_data["data"] = extra_data
     
+    # --- THIS IS THE FIX ---
+    # Add a timestamp to the command
+    cmd_data["timestamp"] = time.time()
+    # --- END FIX ---
+
     rooms[room_code]["commands"].append(cmd_data)
     print(f"📥 Room {room_code}: Stored command '{command}' with data: {extra_data is not None}")
     return jsonify({"status": "ok"})
@@ -46,13 +50,19 @@ def receive_command(room_code):
     if room_code not in rooms:
         return jsonify({"error": "Room not found"}), 404
     
-    cmds = rooms[room_code]["commands"]
-    rooms[room_code]["commands"] = []  # Clear after sending
+    # --- THIS IS THE FIX ---
+    # Get the 'since' timestamp from the client's query
+    since = float(request.args.get("since", 0))
     
-    if cmds:
-        print(f"📤 Room {room_code}: Sending {len(cmds)} command(s)")
+    # Filter commands that are newer than 'since'
+    new_cmds = [cmd for cmd in rooms[room_code]["commands"] if cmd.get("timestamp", 0) > since]
     
-    return jsonify({"commands": cmds})
+    if new_cmds:
+        print(f"📤 Room {room_code}: Sending {len(new_cmds)} command(s) since {since}")
+    
+    # Return the new commands AND the server's current time
+    return jsonify({"commands": new_cmds, "timestamp": time.time()})
+    # --- END FIX --- (Note: We no longer clear the commands list)
 
 
 @app.route("/join/<room_code>", methods=["POST"])
@@ -86,14 +96,17 @@ def cleanup_old_rooms():
             to_delete.append(room_code)
     
     for room_code in to_delete:
-        del rooms[room_code]
-        print(f"Cleaned up room: {room_code}")
+        if room_code in rooms:
+            del rooms[room_code]
+            print(f"Cleaned up room: {room_code}")
 
 
 @app.before_request
 def before_request():
     """Run cleanup before each request."""
-    if len(rooms) > 0:
+    # Run cleanup less frequently (e.g., 1% of requests) to save resources
+    import random
+    if random.random() < 0.01:
         cleanup_old_rooms()
 
 

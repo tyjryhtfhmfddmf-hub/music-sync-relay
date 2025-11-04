@@ -1,0 +1,138 @@
+from flask import Flask, request, jsonify
+import uuid
+import time
+
+app = Flask(__name__)
+rooms = {}
+
+ROOM_TIMEOUT = 3600  # 1 hour
+CLIENT_TIMEOUT = 45  # seconds before a client is considered disconnected
+
+
+@app.route("/host", methods=["POST"])
+def host_session():
+    room_code = str(uuid.uuid4())[:6].upper()
+    rooms[room_code] = {
+        "commands": [],
+        "created_at": time.time(),
+        "last_seen": {request.remote_addr: time.time()} # Add host immediately
+    }
+    print(f"New room hosted: {room_code}")
+    return jsonify({"room_code": room_code})
+
+
+@app.route("/send/<room_code>", methods=["POST"])
+def send_command(room_code):
+    if room_code not in rooms:
+        return jsonify({"error": "Room not found"}), 404
+    
+    data = request.json
+    command = data.get("command")
+    index = data.get("index")
+    extra_data = data.get("data")
+    
+    cmd_data = {"command": command}
+    if index is not None:
+        cmd_data["index"] = index
+    if extra_data is not None:
+        cmd_data["data"] = extra_data
+    
+    cmd_data["timestamp"] = time.time()
+
+    rooms[room_code]["commands"].append(cmd_data)
+    print(f"📥 Room {room_code}: Stored command '{command}'")
+    return jsonify({"status": "ok"})
+
+
+@app.route("/receive/<room_code>", methods=["GET"])
+def receive_command(room_code):
+    if room_code not in rooms:
+        return jsonify({"error": "Room not found"}), 404
+    
+    # Update this client's last seen time
+    rooms[room_code]["last_seen"][request.remote_addr] = time.time()
+
+    # Calculate active clients
+    current_time = time.time()
+    active_clients = {addr for addr, t in rooms[room_code]["last_seen"].items() if current_time - t < CLIENT_TIMEOUT}
+    client_count = len(active_clients)
+
+    # Filter commands for the client
+    since = float(request.args.get("since", 0))
+    new_cmds = [cmd for cmd in rooms[room_code]["commands"] if cmd.get("timestamp", 0) > since]
+    
+    if new_cmds:
+        print(f"📤 Room {room_code}: Sending {len(new_cmds)} command(s) to {request.remote_addr}")
+    
+    # Return commands, timestamp, and the new client count
+    return jsonify({
+        "commands": new_cmds, 
+        "timestamp": current_time,
+        "client_count": client_count
+    })
+
+
+@app.route("/join/<room_code>", methods=["POST"])
+def join_room(room_code):
+    if room_code not in rooms:
+        return jsonify({"error": "Room not found"}), 404
+    
+    # Register the new client
+    rooms[room_code]["last_seen"][request.remote_addr] = time.time()
+    print(f"Client {request.remote_addr} joined room {room_code}")
+    
+    return jsonify({"status": "joined", "room_code": room_code})
+
+
+@app.route("/ping", methods=["GET"])
+def ping():
+    """Keep-alive endpoint."""
+    return jsonify({"status": "alive", "timestamp": time.time()})
+
+
+@app.route("/rooms", methods=["GET"])
+def list_rooms():
+    """List active rooms (for debugging)."""
+    # Clean up inactive clients from the list for more accurate debugging
+    current_time = time.time()
+    for room_data in rooms.values():
+        room_data["last_seen"] = {
+            addr: t for addr, t in room_data["last_seen"].items() 
+            if current_time - t < CLIENT_TIMEOUT
+        }
+
+    return jsonify({
+        "rooms": {
+            code: {
+                "created_at": data["created_at"],
+                "client_count": len(data["last_seen"])
+            } for code, data in rooms.items()
+        },
+        "count": len(rooms)
+    })
+
+
+# Clean up old rooms
+def cleanup_old_rooms():
+    current_time = time.time()
+    to_delete = []
+    for room_code, room_data in rooms.items():
+        if current_time - room_data.get("created_at", 0) > ROOM_TIMEOUT:
+            to_delete.append(room_code)
+    
+    for room_code in to_delete:
+        if room_code in rooms:
+            del rooms[room_code]
+            print(f"Cleaned up room: {room_code}")
+
+
+@app.before_request
+def before_request():
+    """Run cleanup before each request."""
+    import random
+    if random.random() < 0.01:
+        cleanup_old_rooms()
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8080, debug=True)

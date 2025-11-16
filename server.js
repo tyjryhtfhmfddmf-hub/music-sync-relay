@@ -279,16 +279,18 @@ wss.on('connection', (ws) => {
                         console.log(`Song request failed: "${songKey}" not found in room ${clientRoomCode}`);
                     }
                 }
-            } else if (type === 'songFileChunk') {
+            } else if (['webrtcOffer', 'webrtcAnswer', 'iceCandidate'].includes(type)) {
                 if (clientRoomCode && rooms.has(clientRoomCode)) {
                     const room = rooms.get(clientRoomCode);
-                    // Find the original requester
-                    const requester = [...room].find(client => client.id === data.payload.requester);
-                    if (requester) {
-                        // Send the chunk to the requester
-                        requester.send(JSON.stringify({
-                            type: 'songFileChunk',
-                            payload: data.payload
+                    const targetClient = [...room].find(client => client.id === data.payload.target);
+                    if (targetClient) {
+                        console.log(`Relaying ${type} from ${ws.id} to ${targetClient.id}`);
+                        targetClient.send(JSON.stringify({
+                            type,
+                            payload: {
+                                ...data.payload,
+                                sender: ws.id // Add sender ID for context
+                            }
                         }));
                     }
                 }

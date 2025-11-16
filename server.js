@@ -41,6 +41,10 @@ wss.on('connection', (ws) => {
     let clientRoomCode = null; // Store the room code for this client
     ws.library = []; // Add a library property to the WebSocket client
     ws.songKeys = new Set(); // Store a set of song keys for efficient lookup
+    ws.isAlive = true;
+    ws.on('pong', () => {
+        ws.isAlive = true;
+    });
 
     const cleanupClient = () => {
         if (clientRoomCode && rooms.has(clientRoomCode)) {
@@ -322,4 +326,17 @@ app.get('/', (req, res) => {
 
 server.listen(port, () => {
     console.log(`Server started on port ${port}`);
+});
+
+const interval = setInterval(function ping() {
+    wss.clients.forEach(function each(ws) {
+        if (ws.isAlive === false) return ws.terminate();
+
+        ws.isAlive = false;
+        ws.ping(() => {});
+    });
+}, 30000);
+
+wss.on('close', function close() {
+    clearInterval(interval);
 });

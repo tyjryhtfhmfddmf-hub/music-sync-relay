@@ -247,7 +247,7 @@ wss.on('connection', (ws) => {
 
                     console.log(`Synced common songs and updated queue for room: ${clientRoomCode}`);
                 }
-            } else if (type === 'requestSongFile') {
+            } else if (type === 'requestSongFile' || type === 'requestMissingFileChunks') {
                 if (clientRoomCode && rooms.has(clientRoomCode)) {
                     const room = rooms.get(clientRoomCode);
                     const { songKey } = data.payload;
@@ -258,14 +258,14 @@ wss.on('connection', (ws) => {
                     if (songOwner) {
                         // Forward the request to the owner
                         const messageToSend = JSON.stringify({
-                            type: 'requestSongFile',
+                            type: data.type, // Forward the original type
                             payload: {
-                                songKey,
+                                ...data.payload,
                                 requester: ws.id
                             }
                         });
                         songOwner.send(messageToSend);
-                        console.log(`Forwarded song request for "${songKey}" from client ${ws.id} to ${songOwner.id}`);
+                        console.log(`Forwarded ${data.type} for "${songKey}" from client ${ws.id} to ${songOwner.id}`);
                     } else {
                         // Nobody in the room has the song
                         ws.send(JSON.stringify({

@@ -1,4 +1,3 @@
-
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
@@ -65,6 +64,9 @@ wss.on('connection', (ws) => {
             console.log('Received:', data);
 
             const type = data.type ? data.type.trim() : '';
+            const playerControlCommands = [
+                'playCommand', 'pauseCommand', 'nextCommand', 'prevCommand', 'loopCommand', 'shuffleCommand'
+            ];
 
             if (type === 'host') {
                 // A client wants to host a new room.
@@ -155,6 +157,18 @@ wss.on('connection', (ws) => {
                         }
                     });
                     console.log(`Playlist shared in room: ${clientRoomCode}`);
+                }
+            } else if (playerControlCommands.includes(type)) {
+                // Handle all player control commands by broadcasting them.
+                if (clientRoomCode && rooms.has(clientRoomCode)) {
+                    const room = rooms.get(clientRoomCode);
+                    const messageToSend = JSON.stringify(data); // Forward the original message
+                    room.forEach(client => {
+                        if (client !== ws && client.readyState === WebSocket.OPEN) {
+                            client.send(messageToSend);
+                        }
+                    });
+                    console.log(`Player command '${type}' broadcasted in room: ${clientRoomCode}`);
                 }
             } else if (type === 'compareLibraries') {
                 if (clientRoomCode && rooms.has(clientRoomCode)) {

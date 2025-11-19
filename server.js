@@ -46,6 +46,10 @@ wss.on('connection', (ws) => {
     });
 
     const cleanupClient = () => {
+        if (ws.syncInterval) {
+            clearInterval(ws.syncInterval);
+            console.log(`Cleared sync interval for host ${ws.id}`);
+        }
         if (clientRoomCode && rooms.has(clientRoomCode)) {
             const room = rooms.get(clientRoomCode);
             room.delete(ws);
@@ -65,7 +69,7 @@ wss.on('connection', (ws) => {
 
             const type = data.type ? data.type.trim() : '';
             const playerControlCommands = [
-                'playCommand', 'pauseCommand', 'nextCommand', 'prevCommand', 'loopCommand', 'shuffleCommand'
+                'playCommand', 'pauseCommand', 'nextCommand', 'prevCommand', 'loopCommand', 'shuffleCommand', 'fullSync'
             ];
 
             if (type === 'host') {
@@ -74,6 +78,27 @@ wss.on('connection', (ws) => {
                 const newRoomCode = generateRoomCode();
                 rooms.set(newRoomCode, new Set([ws]));
                 clientRoomCode = newRoomCode;
+                ws.isHost = true;
+                ws.playerState = {}; // Initialize player state for the host
+                
+                // Start a sync interval for this host
+                ws.syncInterval = setInterval(() => {
+                    if (ws.readyState === WebSocket.OPEN && ws.isHost) {
+                        const room = rooms.get(newRoomCode);
+                        if (room && room.size > 1) {
+                            const syncMessage = JSON.stringify({
+                                type: 'fullSync',
+                                payload: ws.playerState
+                            });
+                            room.forEach(client => {
+                                if (client !== ws && client.readyState === WebSocket.OPEN) {
+                                    client.send(syncMessage);
+                                }
+                            });
+                        }
+                    }
+                }, 5000); // Sync every 5 seconds
+
                 ws.send(JSON.stringify({
                     type: 'hosted',
                     payload: { roomCode: newRoomCode }
@@ -162,6 +187,13 @@ wss.on('connection', (ws) => {
                 // Handle all player control commands by broadcasting them.
                 if (clientRoomCode && rooms.has(clientRoomCode)) {
                     const room = rooms.get(clientRoomCode);
+
+                    // If the sender is the host, update their stored player state
+                    if (ws.isHost) {
+                        ws.playerState.type = type;
+                        ws.playerState.payload = data.payload;
+                    }
+
                     const messageToSend = JSON.stringify(data); // Forward the original message
                     room.forEach(client => {
                         if (client !== ws && client.readyState === WebSocket.OPEN) {
